@@ -11,19 +11,26 @@ jobs:
   Build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v2
 
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: '3.7.11'
 
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+
       - name: Install Requirements
         run:  pip install flask
-              
+
       - name: Unit Test
         run: python -m unittest -v test
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  
 
   Deploy:
     needs: Build
