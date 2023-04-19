@@ -9,64 +9,62 @@ on:
 
 jobs:
   Build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
+      - name: Download do Repositório
+        uses: actions/checkout@v3       # https://github.com/actions/checkout
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4   # https://github.com/actions/setup-python
         with:
-          python-version: '3.10.0'
-
-      - name: Checkout Repo
-        uses: actions/checkout@v2
+          python-version: '3.10'
 
       - name: Install Requirements
-        run:  pip install flask flask-wtf pytest pytest-cov
-
+        run:  pip install flask
+              
       - name: Unit Test
         run: |
           coverage run --source=app -m pytest test.py
           coverage report -m
           coverage xml -i
-        
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  
 
+      - name: Docker Login
+        run: | 
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > key.json
+          cat key.json | docker login -u _json_key --password-stdin '${{ vars.GOOGLE_ARTIFACT }}'
+
+      - name: Build & Push Image
+        run: | 
+          docker build -t ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest .
+          docker push ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest
+
   Deploy:
     needs: Build
-    runs-on: ubuntu-20.04
-
+    runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3 # https://github.com/actions/checkout
+
+      - name: Auth GCP
+        uses: 'google-github-actions/auth@v1' # https://github.com/google-github-actions/auth
         with:
-          fetch-depth: 0
+          credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
 
-      # Autenticação do Heroku CLI via API TOKEN
-      # https://devcenter.heroku.com/articles/authentication
-      - name: Heroku Login
-        run: | 
-            cat > ~/.netrc <<EOF
-              machine api.heroku.com
-                login $HEROKU_EMAIL
-                password $HEROKU_API_KEY
-              machine git.heroku.com
-                login $HEROKU_EMAIL
-                password $HEROKU_API_KEY
-            EOF
-        env:
-            HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-            HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
-
-      # Adicionando o Repositório Remoto do Heroku para poder enviar o código da app
-      - name: Add Heroku Remote
-        run: heroku git:remote --app $HEROKU_APP_NAME
-        env:
-            HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
-
-      # Enviando o código da App para o Heroku fazer Deploy
-      - name: Push to Heroku & Deploy
-        run: git push heroku HEAD:main --force
+      - name: Cloud Run Deploy
+        id: deploy
+        run: |-
+          gcloud run deploy ${{ vars.GOOGLE_MYAPP }} \
+            --quiet \
+            --region  ${{ vars.GOOGLE_REGION }} \
+            --image ${{ vars.GOOGLE_ARTIFACT }}/${{ vars.GOOGLE_PROJECT_ID }}/${{ vars.GOOGLE_REPONAME }}/${{ vars.GOOGLE_MYAPP }}:latest \
+            --platform managed \
+            --allow-unauthenticated \
+            --project ${{ vars.GOOGLE_PROJECT_ID }} \
+            --format json
